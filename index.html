@@ -1,170 +1,35 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>US Per Diem Rate Optimizer</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    :root {
-      --blue: #2563eb;
-      --green: #16a34a;
-      --bg: #0f172a;
-      --panel: #1e293b;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --error: #f97316;
-    }
-
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "Inter", system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 20% 20%, rgba(37,99,235,0.15), transparent 30%),
-                  radial-gradient(circle at 80% 10%, rgba(16,185,129,0.12), transparent 35%),
-                  var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    header {
-      padding: 20px 24px 10px;
-    }
-
-    h1 {
-      margin: 0 0 6px;
-      font-size: 26px;
-      letter-spacing: -0.02em;
-    }
-
-    p.subtitle {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    .app {
-      display: grid;
-      grid-template-columns: 420px 1fr;
-      gap: 14px;
-      padding: 0 16px 16px;
-      flex: 1 1 auto;
-      min-height: 0;
-    }
-
-    @media (max-width: 900px) {
-      .app {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 14px;
-      padding: 16px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-    }
-
-    form {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    input[type="text"] {
-      flex: 1 1 220px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(15,23,42,0.6);
-      color: var(--text);
-      font-size: 15px;
-    }
-
-    button {
-      padding: 12px 16px;
-      border-radius: 10px;
-      border: none;
-      background: linear-gradient(120deg, var(--blue), #38bdf8);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 12px 24px rgba(37,99,235,0.35);
-      transition: transform 0.1s ease, box-shadow 0.1s ease;
-    }
-
-    button:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(37,99,235,0.45); }
-    button:active { transform: translateY(0); }
-
-    .status {
-      padding: 12px 14px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.04);
-      color: var(--muted);
-      min-height: 46px;
-      white-space: pre-wrap;
-    }
-
-    .status.error { color: var(--error); }
-
-    #map {
-      width: 100%;
-      height: 70vh;
-      min-height: 340px;
-      border-radius: 14px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-    }
-
-    .legend {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 6px 10px;
-      align-items: center;
-      font-size: 14px;
-    }
-
-    .swatch {
-      width: 18px;
-      height: 12px;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.3);
-    }
-
-    .swatch.blue { background: rgba(37,99,235,0.6); }
-    .swatch.green { background: rgba(22,163,74,0.6); }
-    .swatch.gray { background: rgba(148,163,184,0.4); }
-
-    .rates {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.04);
-      border-radius: 12px;
-      padding: 12px;
-    }
-
-    .rates h3 { margin: 0 0 8px; font-size: 16px; }
-    .rates ul { list-style: none; padding: 0; margin: 0; display: flex; gap: 10px; flex-wrap: wrap; }
-    .rates li { background: rgba(37,99,235,0.14); border: 1px solid rgba(37,99,235,0.25); padding: 8px 10px; border-radius: 8px; font-weight: 600; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <header>
     <h1>US Per Diem Rate Optimizer</h1>
-    <p class="subtitle">Find and compare nearby per diem rates by Zip Code using official GSA data and OpenStreetMap.</p>
+    <p class="subtitle">Find and compare nearby per diem rates by Zip Code.</p>
   </header>
 
   <div class="app">
     <section class="panel">
       <form id="search-form">
-        <input id="location-input" type="text" placeholder="City, State or Zip Code (e.g., Seattle, WA or 20500)" required>
+        <input id="location-input" type="text" placeholder="City, State or Zip Code" required>
+        <select id="year-select" aria-label="Select Fiscal Year">
+          <option value="2026">FY 2026</option>
+          <option value="2025" selected>FY 2025</option>
+          <option value="2024">FY 2024</option>
+        </select>
         <button type="submit">Search</button>
+        <button type="button" id="locate-btn" aria-label="Use my location">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L12 22M2 12L22 12M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10z" />
+          </svg>
+        </button>
       </form>
       <div class="legend">
         <div class="swatch blue"></div><span>Target Zip Code</span>
@@ -183,237 +48,7 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    const map = L.map('map').setView([39.5, -98.35], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    let targetLayer = null;
-    let surroundingLayer = L.layerGroup().addTo(map);
-
-    const statusEl = document.getElementById('status');
-    const ratePanel = document.getElementById('rates');
-    const rateList = document.getElementById('rate-list');
-    const locationInput = document.getElementById('location-input');
-
-    document.getElementById('search-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const query = locationInput.value.trim();
-      if (!query) return;
-      clearLayers();
-      updateStatus('Searching for location...');
-      ratePanel.style.display = 'none';
-      rateList.innerHTML = '';
-
-      try {
-        const place = await geocode(query);
-        if (!place) {
-          throw new Error('No matching location found.');
-        }
-
-        const center = [parseFloat(place.lat), parseFloat(place.lon)];
-        const targetZip = await resolveZip(place);
-        if (!targetZip) {
-          throw new Error('Could not determine a Zip Code for this location.');
-        }
-
-        map.setView(center, 11);
-        updateStatus(`Centering map on ${place.display_name} (Zip ${targetZip})...`);
-
-        const targetGeojson = await fetchZipBoundary(targetZip);
-        drawTarget(targetGeojson, center, targetZip);
-
-        const mainRates = await fetchPerDiem(targetZip);
-        displayRates(targetZip, mainRates);
-
-        await renderSurrounding(center, targetZip);
-        updateStatus('Click any shaded area to see its per diem rate.');
-      } catch (err) {
-        console.error(err);
-        updateStatus(err.message, true);
-      }
-    });
-
-    function clearLayers() {
-      if (targetLayer) {
-        targetLayer.remove();
-        targetLayer = null;
-      }
-      surroundingLayer.clearLayers();
-    }
-
-    function updateStatus(message, isError = false) {
-      statusEl.textContent = message;
-      statusEl.classList.toggle('error', Boolean(isError));
-    }
-
-    async function geocode(query) {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(query)}`;
-      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-      if (!res.ok) throw new Error('Geocoding failed. Please try again later.');
-      const data = await res.json();
-      return data[0];
-    }
-
-    async function resolveZip(place) {
-      if (place.address && place.address.postcode) return place.address.postcode;
-      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${place.lat}&lon=${place.lon}&zoom=18&addressdetails=1`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.address?.postcode || null;
-    }
-
-    async function fetchZipBoundary(zip) {
-      const url = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=USA&polygon_geojson=1&format=json&limit=1`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Could not load boundary for the target Zip Code.');
-      const data = await res.json();
-      return data[0]?.geojson || null;
-    }
-
-    function dedupeRates(rates) {
-      const seen = new Set();
-      const unique = [];
-      for (const r of rates) {
-        const key = `${r.lodging || 'N/A'}-${r.mie || 'N/A'}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(r);
-        }
-      }
-      return unique;
-    }
-
-    function formatRates(rates) {
-      if (!rates || !rates.length) return 'No rate data.';
-      const items = dedupeRates(rates);
-      return items.map(r => `Lodging $${r.lodging} | M&IE $${r.mie}`).join('<br>');
-    }
-
-    function displayRates(zip, rates) {
-      ratePanel.style.display = 'block';
-      rateList.innerHTML = '';
-      const unique = dedupeRates(rates);
-      if (!unique.length) {
-        rateList.innerHTML = '<li>No per diem data for this zip.</li>';
-        return;
-      }
-      unique.forEach(r => {
-        const li = document.createElement('li');
-        li.textContent = `Zip ${zip}: Lodging $${r.lodging} / M&IE $${r.mie}`;
-        rateList.appendChild(li);
-      });
-    }
-
-    function drawTarget(geojson, fallbackCenter, zip) {
-      if (geojson) {
-        targetLayer = L.geoJSON(geojson, {
-          style: { color: '#2563eb', weight: 2, fillColor: '#60a5fa', fillOpacity: 0.35 },
-          onEachFeature: (feature, layer) => {
-            layer.on('click', () => {
-              showPopup(layer.getBounds().getCenter(), zip);
-            });
-          }
-        }).addTo(map);
-        map.fitBounds(targetLayer.getBounds(), { padding: [20, 20] });
-      } else {
-        targetLayer = L.circleMarker(fallbackCenter, {
-          radius: 10, color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.6
-        }).addTo(map);
-        targetLayer.on('click', () => showPopup(fallbackCenter, zip));
-      }
-    }
-
-    async function renderSurrounding(center, targetZip) {
-      updateStatus('Loading surrounding Zip Codes...');
-      const neighbors = await fetchSurroundingZips(center, targetZip);
-      if (!neighbors.length) {
-        updateStatus('No nearby postal boundaries found. Showing target only.');
-        return;
-      }
-
-      neighbors.forEach(async (zone) => {
-        const layer = toLeafletShape(zone);
-        if (!layer) return;
-        layer.setStyle({ color: '#16a34a', weight: 1.5, fillColor: '#34d399', fillOpacity: 0.28 });
-        layer.on('click', async () => {
-          const rates = await fetchPerDiem(zone.postalCode);
-          const content = buildPopupContent(zone.postalCode, rates);
-          layer.bindPopup(content).openPopup();
-        });
-        surroundingLayer.addLayer(layer);
-      });
-    }
-
-    function toLeafletShape(zone) {
-      if (zone.geojson) {
-        return L.geoJSON(zone.geojson);
-      }
-      if (zone.geometry && zone.geometry.length) {
-        return L.polygon(zone.geometry.map(pt => [pt.lat, pt.lon]));
-      }
-      return null;
-    }
-
-    async function fetchSurroundingZips(center, targetZip) {
-      const [lat, lon] = center;
-      const radiusMeters = 15000; // 15 km neighborhood
-      const query = `data=[out:json][timeout:25];(relation["boundary"="postal_code"](around:${radiusMeters},${lat},${lon});way["postal_code"](around:${radiusMeters},${lat},${lon}););out geom;`;
-      const url = `https://overpass-api.de/api/interpreter?${query}`;
-      const res = await fetch(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      const zones = [];
-      const seen = new Set();
-      for (const el of data.elements || []) {
-        const code = el.tags?.postal_code;
-        if (!code || code === targetZip || seen.has(code)) continue;
-        seen.add(code);
-        zones.push({ postalCode: code, geometry: el.geometry });
-      }
-      return zones;
-    }
-
-    async function fetchPerDiem(zip) {
-      const year = new Date().getFullYear();
-      const url = `https://api.gsa.gov/travel/perdiem/v2/rates/zip/${zip}?year=${year}&api_key=DEMO_KEY`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        return [];
-      }
-      const data = await res.json();
-      const rawRates = data?.rates || data?.rate || [];
-      const normalized = [];
-      rawRates.forEach(r => {
-        const lodging = Array.isArray(r.lodging) ? r.lodging[0]?.amount ?? r.lodging[0] : (r.lodging_amount ?? r.lodging);
-        const mie = Array.isArray(r.mie) ? r.mie[0]?.amount ?? r.mie[0] : (r.mie_amount ?? r.mie);
-        if (lodging || mie) {
-          normalized.push({ lodging: lodging ?? 'N/A', mie: mie ?? 'N/A' });
-        }
-      });
-      if (!normalized.length && rawRates && rawRates.lodging) {
-        normalized.push({ lodging: rawRates.lodging, mie: rawRates.mie });
-      }
-      return normalized;
-    }
-
-    function buildPopupContent(zip, rates) {
-      const unique = dedupeRates(rates);
-      if (!unique.length) {
-        return `<strong>Zip ${zip}</strong><br>No per diem data.`;
-      }
-      const lines = unique.map(r => `<div>Lodging $${r.lodging} | M&IE $${r.mie}</div>`).join('');
-      return `<strong>Zip ${zip}</strong><br>${lines}`;
-    }
-
-    async function showPopup(latlng, zip) {
-      const rates = await fetchPerDiem(zip);
-      const content = buildPopupContent(zip, rates);
-      L.popup().setLatLng(latlng).setContent(content).openOn(map);
-    }
-  </script>
+  <script src="app.js"></script>
 </body>
+
 </html>
