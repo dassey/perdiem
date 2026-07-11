@@ -191,6 +191,10 @@ button:active {
     background: rgba(22, 163, 74, 0.6);
 }
 
+.swatch.amber {
+    background: rgba(245, 158, 11, 0.7);
+}
+
 .swatch.gray {
     background: rgba(148, 163, 184, 0.4);
 }

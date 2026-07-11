@@ -101,8 +101,8 @@ async function updateView(lat, lon, zip, label) {
     const mainRates = await fetchPerDiem(zip);
     displayRates(zip, mainRates);
 
-    // 3. Surrounding ZIPs (clickable)
-    await renderSurrounding(center, zip);
+    // 3. Surrounding ZIPs (clickable, recolored amber where the rate beats the target)
+    await renderSurrounding(center, zip, mainRates);
     updateStatus('Tap any shaded ZIP area on the map to see its per diem rate.');
 }
 
@@ -225,9 +225,13 @@ async function fetchSurroundingZctas(lat, lon, targetZip) {
 }
 
 // --- CLOUDFLARE WORKER CONNECTION ---
+const rateCache = new Map(); // key: `${zip}-${year}` -> normalized rates
+
 async function fetchPerDiem(zip) {
     const yearSelect = document.getElementById('year-select');
     const year = yearSelect ? yearSelect.value : '2025';
+    const key = `${zip}-${year}`;
+    if (rateCache.has(key)) return rateCache.get(key);
 
     const workerUrl = `https://bushes.dassey.workers.dev`;
     const url = `${workerUrl}?zip=${zip}&year=${year}`;
@@ -240,11 +244,33 @@ async function fetchPerDiem(zip) {
         }
         const data = await res.json();
         const rawRates = (data && (data.rates || data.rate)) || [];
-        return normalizeRates(rawRates);
+        const normalized = normalizeRates(rawRates);
+        rateCache.set(key, normalized);
+        return normalized;
     } catch (e) {
         console.error('Worker Error:', e);
         return [];
     }
+}
+
+// Highest daily allowance (max lodging + M&IE) represented by a set of rates.
+// Used to compare ZIPs. Returns 0 when there is no usable data.
+function rateScore(rates) {
+    let best = 0;
+    for (const r of dedupeRates(rates)) {
+        best = Math.max(best, parseLodging(r.lodging) + (parseFloat(r.mie) || 0));
+    }
+    return best;
+}
+
+function parseLodging(lodging) {
+    if (typeof lodging === 'number') return lodging;
+    if (typeof lodging === 'string') {
+        // Handles flat values and seasonal ranges like "165-215"
+        const nums = lodging.split('-').map((s) => parseFloat(s)).filter((n) => !isNaN(n));
+        if (nums.length) return Math.max(...nums);
+    }
+    return 0;
 }
 
 function normalizeRates(rawRates) {
@@ -314,7 +340,10 @@ function drawTarget(feature, fallbackCenter, zip) {
     }
 }
 
-async function renderSurrounding(center, targetZip) {
+const GREEN_STYLE = { color: '#16a34a', weight: 1.5, fillColor: '#34d399', fillOpacity: 0.25 };
+const AMBER_STYLE = { color: '#b45309', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 0.45 };
+
+async function renderSurrounding(center, targetZip, targetRates) {
     updateStatus('Loading surrounding ZIP codes...', false, true);
     const neighbors = await fetchSurroundingZctas(center[0], center[1], targetZip);
     if (!neighbors.length) {
@@ -322,18 +351,37 @@ async function renderSurrounding(center, targetZip) {
         return;
     }
 
+    const entries = [];
     neighbors.forEach((feature) => {
         const zip = feature.properties.ZCTA5;
-        const layer = L.geoJSON(feature, {
-            style: { color: '#16a34a', weight: 1.5, fillColor: '#34d399', fillOpacity: 0.25 }
-        });
+        const layer = L.geoJSON(feature, { style: GREEN_STYLE });
         layer.on('click', async () => {
             layer.bindPopup(`<strong>ZIP ${zip}</strong><br><em>Loading rates…</em>`).openPopup();
             const rates = await fetchPerDiem(zip);
             layer.setPopupContent(buildPopupContent(zip, rates));
         });
         surroundingLayer.addLayer(layer);
+        entries.push({ zip, layer });
     });
+
+    // Recolor neighbors whose per diem beats the target's, in the background so
+    // the map stays responsive. Skipped if the target has no rate to compare.
+    const targetScore = rateScore(targetRates);
+    if (targetScore > 0) highlightHigherRates(entries, targetScore);
+}
+
+async function highlightHigherRates(entries, targetScore) {
+    const queue = entries.slice();
+    const worker = async () => {
+        while (queue.length) {
+            const { zip, layer } = queue.shift();
+            const rates = await fetchPerDiem(zip);
+            if (rateScore(rates) > targetScore) layer.setStyle(AMBER_STYLE);
+        }
+    };
+    // Limited concurrency to avoid hammering the worker with ~40 requests at once.
+    const pool = Array.from({ length: Math.min(6, queue.length) }, worker);
+    await Promise.all(pool);
 }
 
 function buildPopupContent(zip, rates) {
