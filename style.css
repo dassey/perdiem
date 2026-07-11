@@ -12,8 +12,12 @@
     box-sizing: border-box;
 }
 
+html,
 body {
     margin: 0;
+}
+
+body {
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.15), transparent 30%),
         radial-gradient(circle at 80% 10%, rgba(16, 185, 129, 0.12), transparent 35%),
@@ -22,89 +26,91 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    -webkit-text-size-adjust: 100%;
 }
 
+/* ---------- Mobile-first base ---------- */
+
 header {
-    padding: 20px 24px 10px;
+    padding: 16px 16px 4px;
 }
 
 h1 {
-    margin: 0 0 6px;
-    font-size: 26px;
+    margin: 0 0 4px;
+    font-size: 20px;
+    line-height: 1.2;
     letter-spacing: -0.02em;
 }
 
 p.subtitle {
     margin: 0;
     color: var(--muted);
+    font-size: 14px;
 }
 
 .app {
-    display: grid;
-    grid-template-columns: 420px 1fr;
-    gap: 14px;
-    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
     flex: 1 1 auto;
     min-height: 0;
-}
-
-@media (max-width: 900px) {
-    .app {
-        grid-template-columns: 1fr;
-    }
 }
 
 .panel {
     background: var(--panel);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 14px;
-    padding: 16px;
+    padding: 14px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
     min-height: 0;
 }
 
+/* Form: input on its own row, then year + search + locate */
 form {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
 input[type="text"] {
-    flex: 1 1 220px;
-    padding: 12px 14px;
+    flex: 1 1 100%;
+    min-width: 0;
+    padding: 14px;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(15, 23, 42, 0.6);
     color: var(--text);
-    color: var(--text);
-    font-size: 15px;
+    font-size: 16px; /* >=16px prevents iOS zoom-on-focus */
 }
 
 select {
-    padding: 12px 14px;
+    flex: 1 1 90px;
+    padding: 14px 2.4em 14px 14px;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(15, 23, 42, 0.6);
     color: var(--text);
-    font-size: 15px;
+    font-size: 16px;
     appearance: none;
     background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23e2e8f0%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
     background-repeat: no-repeat;
     background-position: right .7em top 50%;
     background-size: .65em auto;
-    padding-right: 2.5em;
 }
 
 button {
-    padding: 12px 16px;
+    padding: 14px 16px;
+    min-height: 48px;
     border-radius: 10px;
     border: none;
     background: linear-gradient(120deg, var(--blue), #38bdf8);
     color: #fff;
     font-weight: 600;
+    font-size: 15px;
     cursor: pointer;
     box-shadow: 0 12px 24px rgba(37, 99, 235, 0.35);
     transition: transform 0.1s ease, box-shadow 0.1s ease;
@@ -113,11 +119,17 @@ button {
     justify-content: center;
 }
 
+button[type="submit"] {
+    flex: 2 1 120px;
+}
+
 #locate-btn {
+    flex: 0 0 auto;
     background: rgba(255, 255, 255, 0.1);
     box-shadow: none;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 12px;
+    padding: 14px;
+    width: 48px;
 }
 
 #locate-btn:hover {
@@ -148,8 +160,8 @@ button:active {
 
 #map {
     width: 100%;
-    height: 70vh;
-    min-height: 340px;
+    height: 60vh;
+    min-height: 320px;
     border-radius: 14px;
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -161,7 +173,7 @@ button:active {
     grid-template-columns: auto 1fr;
     gap: 6px 10px;
     align-items: center;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .swatch {
@@ -210,6 +222,7 @@ button:active {
     padding: 8px 10px;
     border-radius: 8px;
     font-weight: 600;
+    font-size: 14px;
     transition: background 0.2s, transform 0.2s;
 }
 
@@ -245,5 +258,51 @@ button:active {
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+/* ---------- Tablet / desktop enhancements ---------- */
+
+@media (min-width: 720px) {
+    header {
+        padding: 20px 24px 10px;
+    }
+
+    h1 {
+        font-size: 26px;
+    }
+
+    p.subtitle {
+        font-size: 16px;
+    }
+
+    input[type="text"] {
+        flex: 1 1 220px;
+    }
+
+    select {
+        flex: 0 1 auto;
+    }
+
+    button[type="submit"] {
+        flex: 0 1 auto;
+    }
+}
+
+@media (min-width: 960px) {
+    .app {
+        display: grid;
+        grid-template-columns: 400px 1fr;
+        gap: 14px;
+        padding: 0 16px 16px;
+    }
+
+    .panel.map-panel {
+        padding: 0;
+    }
+
+    #map {
+        height: 100%;
+        min-height: 420px;
     }
 }

@@ -4,6 +4,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
 
+// Keep the map sized correctly on mobile (orientation changes, keyboard, etc.)
+window.addEventListener('resize', () => map.invalidateSize());
+setTimeout(() => map.invalidateSize(), 200);
+
 let targetLayer = null;
 let surroundingLayer = L.layerGroup().addTo(map);
 
@@ -11,6 +15,13 @@ const statusEl = document.getElementById('status');
 const ratePanel = document.getElementById('rates');
 const rateList = document.getElementById('rate-list');
 const locationInput = document.getElementById('location-input');
+
+// US Census TIGERweb ZIP Code Tabulation Areas (ZCTA) polygon layer.
+// This is the authoritative free source for US ZIP boundaries (CORS-enabled, no key).
+const CENSUS_ZCTA =
+    'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/2/query';
+
+const isZip = (q) => /^\d{5}$/.test(q.trim());
 
 // --- SEARCH HANDLER ---
 document.getElementById('search-form').addEventListener('submit', async (e) => {
@@ -24,17 +35,18 @@ document.getElementById('search-form').addEventListener('submit', async (e) => {
     rateList.innerHTML = '';
 
     try {
-        const place = await geocode(query);
-        if (!place) throw new Error('No matching location found.');
+        const point = await geocodeToPoint(query);
+        if (!point) throw new Error('No matching location found. Try "City, State" or a 5-digit ZIP.');
 
-        const lat = parseFloat(place.lat);
-        const lon = parseFloat(place.lon);
+        // Resolve the target ZIP. If the user typed a ZIP, trust it; otherwise
+        // find the ZCTA that actually contains the geocoded point so it matches
+        // the boundary we can draw.
+        let zip = isZip(query) ? query.trim() : null;
+        if (!zip) zip = await zctaAtPoint(point.lat, point.lon);
+        if (!zip) zip = point.zip;
+        if (!zip) throw new Error('Could not determine a ZIP code for this location.');
 
-        const targetZip = await resolveZip(place);
-        if (!targetZip) throw new Error('Could not determine a Zip Code for this location.');
-
-        await updateView(lat, lon, targetZip, place.display_name);
-
+        await updateView(point.lat, point.lon, zip, point.label);
     } catch (err) {
         console.error(err);
         updateStatus(err.message, true);
@@ -57,22 +69,19 @@ if (locateBtn) {
                 const lon = pos.coords.longitude;
 
                 clearLayers();
-                updateStatus('Found location. Finding Zip Code...', false, true);
+                updateStatus('Found location. Finding ZIP code...', false, true);
                 ratePanel.style.display = 'none';
                 rateList.innerHTML = '';
 
-                const place = { lat, lon };
-                const targetZip = await resolveZip(place);
+                const zip = await zctaAtPoint(lat, lon);
+                if (!zip) throw new Error('Could not determine a ZIP code for your location.');
 
-                if (!targetZip) throw new Error('Could not determine a Zip Code for your location.');
-
-                await updateView(lat, lon, targetZip, "Your Location");
-
+                await updateView(lat, lon, zip, 'Your Location');
             } catch (err) {
                 console.error(err);
                 updateStatus(err.message, true);
             }
-        }, (err) => {
+        }, () => {
             updateStatus('Unable to retrieve your location.', true);
         });
     });
@@ -82,19 +91,19 @@ if (locateBtn) {
 async function updateView(lat, lon, zip, label) {
     const center = [lat, lon];
     map.setView(center, 11);
-    updateStatus(`Centering map on ${label} (Zip ${zip})...`, false, true);
+    updateStatus(`Loading ${label} (ZIP ${zip})...`, false, true);
 
-    // 1. Get Boundary
-    const targetGeojson = await fetchZipBoundary(zip);
-    drawTarget(targetGeojson, center, zip);
+    // 1. Target ZIP boundary
+    const targetFeature = await fetchZctaBoundary(zip);
+    drawTarget(targetFeature, center, zip);
 
-    // 2. Get Rates (From your Worker)
+    // 2. Rates for the target ZIP (from the Cloudflare Worker)
     const mainRates = await fetchPerDiem(zip);
     displayRates(zip, mainRates);
 
-    // 3. Get Neighbors
+    // 3. Surrounding ZIPs (clickable)
     await renderSurrounding(center, zip);
-    updateStatus('Click any shaded area to see its per diem rate.');
+    updateStatus('Tap any shaded ZIP area on the map to see its per diem rate.');
 }
 
 function clearLayers() {
@@ -116,94 +125,143 @@ function updateStatus(message, isError = false, isLoading = false) {
     statusEl.classList.toggle('error', Boolean(isError));
 }
 
-// --- API HELPERS ---
+// --- GEOCODING HELPERS ---
 
-async function geocode(query) {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(query)}`;
+// Turn any user query (ZIP or "City, State") into { lat, lon, zip?, label }.
+async function geocodeToPoint(query) {
+    const q = query.trim();
+
+    if (isZip(q)) {
+        try {
+            const res = await fetch(`https://api.zippopotam.us/us/${q}`);
+            if (res.ok) {
+                const d = await res.json();
+                const p = d.places && d.places[0];
+                if (p) {
+                    return {
+                        lat: parseFloat(p.latitude),
+                        lon: parseFloat(p.longitude),
+                        zip: q,
+                        label: `${p['place name']}, ${p['state abbreviation']}`
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('Zippopotam lookup failed, falling back to Nominatim.', e);
+        }
+        // fall through to Nominatim if Zippopotam has no data
+    }
+
+    // City / state / free-form (restricted to the US)
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=us&limit=1&q=${encodeURIComponent(q)}`;
     const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-    if (!res.ok) throw new Error('Geocoding failed. Please try again later.');
+    if (!res.ok) throw new Error('Location search failed. Please try again later.');
     const data = await res.json();
-    return data[0];
+    const place = data[0];
+    if (!place) return null;
+
+    const postcode = place.address && place.address.postcode;
+    return {
+        lat: parseFloat(place.lat),
+        lon: parseFloat(place.lon),
+        zip: postcode && isZip(postcode) ? postcode : null,
+        label: shortLabel(place)
+    };
 }
 
-async function resolveZip(place) {
-    if (place.address && place.address.postcode) return place.address.postcode;
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${place.lat}&lon=${place.lon}&zoom=18&addressdetails=1`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.address?.postcode || null;
+function shortLabel(place) {
+    const a = place.address || {};
+    const city = a.city || a.town || a.village || a.hamlet || a.county;
+    const state = a.state;
+    if (city && state) return `${city}, ${state}`;
+    return (place.display_name || '').split(',').slice(0, 2).join(',');
 }
 
-async function fetchZipBoundary(zip) {
-    const url = `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=USA&polygon_geojson=1&format=json&limit=1`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Could not load boundary for the target Zip Code.');
-    const data = await res.json();
-    return data[0]?.geojson || null;
+// Find the ZCTA (ZIP) that contains a lat/lon.
+async function zctaAtPoint(lat, lon) {
+    try {
+        const url = `${CENSUS_ZCTA}?geometry=${lon},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=ZCTA5&returnGeometry=false&f=json`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return (data.features && data.features[0] && data.features[0].attributes.ZCTA5) || null;
+    } catch (e) {
+        console.error('ZCTA point lookup failed.', e);
+        return null;
+    }
+}
+
+// GeoJSON Feature for a single ZIP boundary.
+async function fetchZctaBoundary(zip) {
+    try {
+        const url = `${CENSUS_ZCTA}?where=ZCTA5%3D'${zip}'&outFields=ZCTA5&returnGeometry=true&outSR=4326&f=geojson`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return (data.features && data.features[0]) || null;
+    } catch (e) {
+        console.error('ZCTA boundary fetch failed.', e);
+        return null;
+    }
+}
+
+// GeoJSON Features for ZIP boundaries surrounding a center point.
+async function fetchSurroundingZctas(lat, lon, targetZip) {
+    try {
+        const dLat = 0.11;
+        const dLon = 0.13;
+        const bbox = `${lon - dLon},${lat - dLat},${lon + dLon},${lat + dLat}`;
+        const url = `${CENSUS_ZCTA}?geometry=${bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=ZCTA5&returnGeometry=true&outSR=4326&resultRecordCount=50&f=geojson`;
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.features || []).filter(
+            (f) => f.properties && f.properties.ZCTA5 && f.properties.ZCTA5 !== targetZip
+        );
+    } catch (e) {
+        console.error('Surrounding ZCTA fetch failed.', e);
+        return [];
+    }
 }
 
 // --- CLOUDFLARE WORKER CONNECTION ---
 async function fetchPerDiem(zip) {
-    // Get year from dropdown, default to 2025 if missing
     const yearSelect = document.getElementById('year-select');
     const year = yearSelect ? yearSelect.value : '2025';
 
-    // DIRECT LINK TO YOUR WORKER
     const workerUrl = `https://bushes.dassey.workers.dev`;
     const url = `${workerUrl}?zip=${zip}&year=${year}`;
 
-    // --- LOGGING ADDED HERE ---
-    console.log("Attempting to fetch from:", url);
-
     try {
         const res = await fetch(url);
-
-        // Log the status to see if it connected
-        console.log("Response status:", res.status);
-
         if (!res.ok) {
-            console.error("Fetch failed with status:", res.status);
+            console.error('Per diem fetch failed with status:', res.status);
             return [];
         }
-
         const data = await res.json();
-        console.log("Data received:", data); // Optional: See the raw data
-
-        // Handle GSA API structure
-        const rawRates = data?.rates || data?.rate || [];
+        const rawRates = (data && (data.rates || data.rate)) || [];
         return normalizeRates(rawRates);
     } catch (e) {
-        console.error("Worker Error:", e);
+        console.error('Worker Error:', e);
         return [];
     }
 }
 
 function normalizeRates(rawRates) {
     const normalized = [];
-    // Ensure we have a list to iterate
     const list = Array.isArray(rawRates) ? rawRates : [rawRates];
 
-    list.forEach(mainItem => {
-        // GSA V2 structure often has a 'rate' array inside the main item
-        // e.g. { rate: [ { meals: 80, months: { month: [...] } } ] }
+    list.forEach((mainItem) => {
         const subRates = mainItem.rate || [];
-
-        subRates.forEach(r => {
-            // Meals (M&IE)
+        subRates.forEach((r) => {
             const mie = r.meals;
-
-            // Lodging - typically in months.month array
             let lodging = 'N/A';
             if (r.months && r.months.month && Array.isArray(r.months.month)) {
-                // Extract all values
-                const prices = r.months.month.map(m => m.value);
+                const prices = r.months.month.map((m) => m.value);
                 const min = Math.min(...prices);
                 const max = Math.max(...prices);
-                // If flat rate, show one price. If seasonal, show range.
-                lodging = (min === max) ? min : `${min}-${max}`;
+                lodging = min === max ? min : `${min}-${max}`;
             }
-
             normalized.push({ lodging: lodging, mie: mie });
         });
     });
@@ -231,27 +289,23 @@ function displayRates(zip, rates) {
     rateList.innerHTML = '';
     const unique = dedupeRates(rates);
     if (!unique.length) {
-        rateList.innerHTML = '<li>No per diem data for this zip.</li>';
+        rateList.innerHTML = '<li>No per diem data for this ZIP.</li>';
         return;
     }
-    unique.forEach(r => {
+    unique.forEach((r) => {
         const li = document.createElement('li');
-        li.textContent = `Zip ${zip}: Lodging $${r.lodging} / M&IE $${r.mie}`;
+        li.textContent = `ZIP ${zip}: Lodging $${r.lodging} / M&IE $${r.mie}`;
         rateList.appendChild(li);
     });
 }
 
-function drawTarget(geojson, fallbackCenter, zip) {
-    if (geojson) {
-        targetLayer = L.geoJSON(geojson, {
-            style: { color: '#2563eb', weight: 2, fillColor: '#60a5fa', fillOpacity: 0.35 },
-            onEachFeature: (feature, layer) => {
-                layer.on('click', () => {
-                    showPopup(layer.getBounds().getCenter(), zip);
-                });
-            }
+function drawTarget(feature, fallbackCenter, zip) {
+    if (feature && feature.geometry) {
+        targetLayer = L.geoJSON(feature, {
+            style: { color: '#2563eb', weight: 2, fillColor: '#60a5fa', fillOpacity: 0.35 }
         }).addTo(map);
-        map.fitBounds(targetLayer.getBounds(), { padding: [20, 20] });
+        targetLayer.on('click', () => showPopup(targetLayer.getBounds().getCenter(), zip));
+        map.fitBounds(targetLayer.getBounds(), { padding: [24, 24], maxZoom: 13 });
     } else {
         targetLayer = L.circleMarker(fallbackCenter, {
             radius: 10, color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.6
@@ -261,66 +315,38 @@ function drawTarget(geojson, fallbackCenter, zip) {
 }
 
 async function renderSurrounding(center, targetZip) {
-    updateStatus('Loading surrounding Zip Codes...', false, true);
-    const neighbors = await fetchSurroundingZips(center, targetZip);
+    updateStatus('Loading surrounding ZIP codes...', false, true);
+    const neighbors = await fetchSurroundingZctas(center[0], center[1], targetZip);
     if (!neighbors.length) {
-        updateStatus('No nearby postal boundaries found. Showing target only.');
+        updateStatus('No surrounding ZIP boundaries found. Showing target only.');
         return;
     }
 
-    neighbors.forEach(async (zone) => {
-        const layer = toLeafletShape(zone);
-        if (!layer) return;
-        layer.setStyle({ color: '#16a34a', weight: 1.5, fillColor: '#34d399', fillOpacity: 0.28 });
+    neighbors.forEach((feature) => {
+        const zip = feature.properties.ZCTA5;
+        const layer = L.geoJSON(feature, {
+            style: { color: '#16a34a', weight: 1.5, fillColor: '#34d399', fillOpacity: 0.25 }
+        });
         layer.on('click', async () => {
-            const rates = await fetchPerDiem(zone.postalCode);
-            const content = buildPopupContent(zone.postalCode, rates);
-            layer.bindPopup(content).openPopup();
+            layer.bindPopup(`<strong>ZIP ${zip}</strong><br><em>Loading rates…</em>`).openPopup();
+            const rates = await fetchPerDiem(zip);
+            layer.setPopupContent(buildPopupContent(zip, rates));
         });
         surroundingLayer.addLayer(layer);
     });
 }
 
-function toLeafletShape(zone) {
-    if (zone.geojson) {
-        return L.geoJSON(zone.geojson);
-    }
-    if (zone.geometry && zone.geometry.length) {
-        return L.polygon(zone.geometry.map(pt => [pt.lat, pt.lon]));
-    }
-    return null;
-}
-
-async function fetchSurroundingZips(center, targetZip) {
-    const [lat, lon] = center;
-    const radiusMeters = 15000; // 15 km neighborhood
-    const query = `data=[out:json][timeout:25];(relation["boundary"="postal_code"](around:${radiusMeters},${lat},${lon});way["postal_code"](around:${radiusMeters},${lat},${lon}););out geom;`;
-    const url = `https://overpass-api.de/api/interpreter?${query}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    const zones = [];
-    const seen = new Set();
-    for (const el of data.elements || []) {
-        const code = el.tags?.postal_code;
-        if (!code || code === targetZip || seen.has(code)) continue;
-        seen.add(code);
-        zones.push({ postalCode: code, geometry: el.geometry });
-    }
-    return zones;
-}
-
 function buildPopupContent(zip, rates) {
     const unique = dedupeRates(rates);
     if (!unique.length) {
-        return `<strong>Zip ${zip}</strong><br>No per diem data.`;
+        return `<strong>ZIP ${zip}</strong><br>No per diem data.`;
     }
-    const lines = unique.map(r => `<div>Lodging $${r.lodging} | M&IE $${r.mie}</div>`).join('');
-    return `<strong>Zip ${zip}</strong><br>${lines}`;
+    const lines = unique.map((r) => `<div>Lodging $${r.lodging} | M&IE $${r.mie}</div>`).join('');
+    return `<strong>ZIP ${zip}</strong><br>${lines}`;
 }
 
 async function showPopup(latlng, zip) {
+    L.popup().setLatLng(latlng).setContent(`<strong>ZIP ${zip}</strong><br><em>Loading rates…</em>`).openOn(map);
     const rates = await fetchPerDiem(zip);
-    const content = buildPopupContent(zip, rates);
-    L.popup().setLatLng(latlng).setContent(content).openOn(map);
+    L.popup().setLatLng(latlng).setContent(buildPopupContent(zip, rates)).openOn(map);
 }
